@@ -1,3 +1,20 @@
-.snowpack
-build
-node_modules
+# Ignore all node_modules folders in any subdirectory
+**/node_modules/
+
+# Ignore build outputs (React apps usually use build/)
+**/build/
+**/dist/
+
+# Ignore environment files
+**/.env
+**/.env.*
+
+# Ignore testing outputs
+**/coverage/
+
+# OS / Editor / System files
+.DS_Store
+*.log
+.vscode/
+.idea/
+*.swp
