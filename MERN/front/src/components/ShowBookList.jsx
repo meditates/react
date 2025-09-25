@@ -8,14 +8,16 @@ function ShowBookList() {
   const [books, setBooks] = useState([]);
 
   useEffect(() => {
-    axios
-      .get("http://localhost:8082/api/books")
-      .then((res) => {
-        setBooks(res.data);
-      })
-      .catch((err) => {
-        console.log("Error from ShowBookList");
-      });
+    const fetchBooks = () => {
+      axios
+        .get("http://localhost:8082/api/books")
+        .then((res) => setBooks(res.data))
+        .catch(() => console.log("Error from ShowBookList"));
+    };
+    fetchBooks();
+    const handler = () => fetchBooks();
+    window.addEventListener('books:changed', handler);
+    return () => window.removeEventListener('books:changed', handler);
   }, []);
 
   const bookList =

@@ -162,15 +162,13 @@ function UpdateBookInfo(props) {
             <label htmlFor="image" className="block mb-1 font-medium">
               Book Image
             </label>
-            {book.image && (
-              <div className="mb-2">
-                <img
-                  src={`http://localhost:8082${book.image}`}
-                  alt="book"
-                  className="max-w-[200px] max-h-[200px] rounded shadow"
-                />
-              </div>
-            )}
+            <div className="mb-2">
+              <img
+                src={book.image ? `http://localhost:8082${book.image}` : "/newbooks.jpeg"}
+                alt="book"
+                className="max-w-[200px] max-h-[200px] rounded shadow"
+              />
+            </div>
             <input
               type="file"
               accept="image/*"

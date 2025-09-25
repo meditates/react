@@ -9,14 +9,20 @@ function ShowBookDetails(props) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    axios
-      .get(`http://localhost:8082/api/books/${id}`)
-      .then((res) => {
-        setBook(res.data);
-      })
-      .catch((err) => {
-        console.log("Error from ShowBookDetails");
-      });
+    const fetchBook = () => {
+      axios
+        .get(`http://localhost:8082/api/books/${id}`)
+        .then((res) => {
+          setBook(res.data);
+        })
+        .catch((err) => {
+          console.log("Error from ShowBookDetails");
+        });
+    };
+    fetchBook();
+    const handler = () => fetchBook();
+    window.addEventListener('books:changed', handler);
+    return () => window.removeEventListener('books:changed', handler);
   }, [id]);
 
   const onDeleteClick = (id) => {
@@ -32,6 +38,13 @@ function ShowBookDetails(props) {
 
   const BookItem = (
     <div>
+      <div className="mb-4 flex justify-center">
+        <img
+          src={book.image ? `http://localhost:8082${book.image}` : "/newbook.jpeg"}
+          alt="Book"
+          className="max-h-48 rounded shadow"
+        />
+      </div>
       <table className="table table-hover table-dark">
         <tbody>
           <tr>

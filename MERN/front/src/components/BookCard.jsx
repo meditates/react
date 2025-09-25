@@ -5,11 +5,7 @@ const BookCard = ({ book }) => {
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden flex flex-col h-full scale-90 max-w-xs mx-auto">
       <img
-        src={
-          book.image
-            ? `http://localhost:8082${book.image}`
-            : "https://images.unsplash.com/photo-1495446815901-a7297e633e8d"
-        }
+        src={book.image ? `http://localhost:8082${book.image}` : "/newbook.jpeg"}
         alt="Books"
         className="w-full h-32 object-cover"
       />

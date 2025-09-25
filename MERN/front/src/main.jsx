@@ -15,6 +15,7 @@ import CreateBook from "./components/CreateBook";
 import ShowBookList from "./components/ShowBookList";
 import ShowBookDetails from "./components/ShowBookDetails";
 import UpdateBookInfo from "./components/UpdateBookInfo";
+import AssistantBubble from './components/AssistantBubble';
 
 // Routes
 const router = createBrowserRouter([
@@ -26,6 +27,9 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <>
+      <RouterProvider router={router} />
+      <AssistantBubble />
+    </>
   </React.StrictMode>
 );

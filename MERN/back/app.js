@@ -1,6 +1,7 @@
 const express = require('express');
 const connectDB = require('./config/db');
 const routes = require("./routes/api/books");
+const assistantRoutes = require('./routes/api/assistant');
 const cors = require("cors");
 const bodyParser = require("body-parser");
 require('dotenv').config();
@@ -17,6 +18,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // use the routes module as a middleware
 // for the /api/books path
 app.use("/api/books", routes);
+app.use('/api/assistant', assistantRoutes);
 app.use('/uploads', express.static('uploads'));
 
 // Connect Database

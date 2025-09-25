@@ -47,6 +47,9 @@ router.post('/', upload.single('image'), (req, res) => {
   const bookData = req.body;
   if (req.file) {
     bookData.image = `/uploads/${req.file.filename}`;
+  } else {
+    // Set default image when none is provided (use existing file in uploads)
+    bookData.image = '/uploads/newbooks.jpeg';
   }
   Book.create(bookData)
     .then(book => res.json(book))
@@ -60,6 +63,9 @@ router.put('/:id', upload.single('image'), (req, res) => {
   const bookData = req.body;
   if (req.file) {
     bookData.image = `/uploads/${req.file.filename}`;
+  } else if (bookData.image === undefined || bookData.image === null || bookData.image === '') {
+    // Ensure a default image persists when clearing/not providing an image
+    bookData.image = '/uploads/newbooks.jpeg';
   }
   Book.findByIdAndUpdate(req.params.id, bookData, { new: true })
     .then(book => res.json(book))
