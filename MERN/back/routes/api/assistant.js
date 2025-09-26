@@ -47,8 +47,8 @@ function getMissingRequiredFields(state) {
 }
 
 // Gemini function calling integration (with fallback)
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = process.env.GOOGLE_API_KEY ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) : null;
+const { GoogleGenAI } = require('@google/genai');
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenAI({}) : null;
 
 function getToolSpecForAction() {
   return [
@@ -170,10 +170,22 @@ async function extractFieldsWithLLM({ message, state }) {
   if (!genAI) {
     const updates = {};
     const lower = message.toLowerCase();
-    // Parse patterns like: "change book <title>", "update book <title>"
-    const changeBookMatch = message.match(/^(?:change|update)\s+book\s+(.+)/i);
+    // Parse patterns like: "change book <title>", "update book <title>", "update the book <title>"
+    // But avoid matching generic words like "wanted", "needed", etc.
+    const changeBookMatch = message.match(/^(?:change|update)\s+(?:the\s+)?book\s+([^,]+?)(?:\s*,\s*|$)/i);
     if (changeBookMatch && changeBookMatch[1]) {
-      updates.title = changeBookMatch[1].trim();
+      const title = changeBookMatch[1].trim();
+      // Only set as title if it's not a generic word
+      if (!/^(wanted|needed|required|desired)$/i.test(title)) {
+        updates.title = title;
+        updates.action = 'update_book';
+      }
+    }
+    
+    // Parse patterns like: "change author of <title>", "update author of <title>"
+    const changeAuthorMatch = message.match(/^(?:change|update)\s+author\s+of\s+(.+)/i);
+    if (changeAuthorMatch && changeAuthorMatch[1]) {
+      updates.title = changeAuthorMatch[1].trim();
       updates.action = 'update_book';
     }
     const getValue = (key) => {
@@ -190,6 +202,13 @@ async function extractFieldsWithLLM({ message, state }) {
       { key: 'publisher', regex: /(?:publisher|Publisher)[:=]\s*([^,\s]+)/i },
       { key: 'published_date', regex: /(?:published_date|publishedDate|date|Date)[:=]\s*([^,\s]+)/i }
     ];
+    
+    // Handle patterns like "I want to change the author to Sarah"
+    const changeAuthorToMatch = message.match(/I\s+want\s+to\s+change\s+the\s+author\s+to\s+([^,\s]+)/i);
+    if (changeAuthorToMatch && changeAuthorToMatch[1]) {
+      updates.author = changeAuthorToMatch[1].trim();
+      updates.action = 'update_book';
+    }
     
     for (const pattern of patterns) {
       if (updates[pattern.key] == null) {
@@ -215,38 +234,75 @@ async function extractFieldsWithLLM({ message, state }) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      tools: [{ functionDeclarations: getToolSpecForAction() }],
+    console.log('Extracting fields with LLM');
+    const system = 'You are a book management assistant. Extract structured fields from user messages and return them in JSON format.';
+    const prompt = `${system}\n\nCurrent state: ${JSON.stringify(state)}\n\nUser said: ${message}\n\nPlease extract the relevant fields and return them as JSON. If the user wants to create a book, include action: "create_book". If they want to update a book, include action: "update_book".`;
+    
+    console.log('Sending request to Gemini API...');
+    const response = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
     });
-    const system = 'You extract structured fields for book create/update and return one function call.';
-    const input = [
-      { role: 'user', parts: [{ text: system }] },
-      { role: 'user', parts: [{ text: `Current state: ${JSON.stringify(state)}` }] },
-      { role: 'user', parts: [{ text: `User said: ${message}` }] },
-    ];
-    const response = await model.generateContent({ contents: input });
-    const candidates = response && response.response && response.response.candidates || [];
-    const functionParts = candidates[0] && candidates[0].content && candidates[0].content.parts || [];
-    const callPart = functionParts.find((p) => p.functionCall);
-    if (callPart && callPart.functionCall) {
-      const { name, args } = callPart.functionCall;
-      let updates = { ...(args || {}) };
-      if (name === 'create_book') updates.action = 'create_book';
-      if (name === 'update_book') updates.action = 'update_book';
-      updates = enrichUpdatesFromMessage(message, updates);
-      return { tool: name, params: updates };
+    
+    console.log('Gemini API response received');
+    const text = response.text || '';
+    console.log('Response text:', text);
+    
+    // Try to parse JSON from the response
+    try {
+      // Look for JSON in the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log('Parsed JSON from response:', parsed);
+        // Only enrich if LLM didn't extract much useful info
+        const hasUsefulData = Object.keys(parsed).length > 1 || (parsed.title || parsed.author || parsed.isbn);
+        const updates = hasUsefulData ? parsed : enrichUpdatesFromMessage(message, parsed);
+        console.log('Returning parsed result:', { tool: null, params: updates });
+        return { tool: null, params: updates };
+      }
+    } catch (parseErr) {
+      console.log('Failed to parse JSON from response:', parseErr.message);
     }
-    return { tool: null, params: enrichUpdatesFromMessage(message, {}) };
+    
+    // Fallback to pattern matching
+    const updates = {};
+    const lower = text.toLowerCase();
+    
+    // Basic pattern matching as fallback
+    if (lower.includes('create')) updates.action = 'create_book';
+    if (lower.includes('update') || lower.includes('edit')) updates.action = 'update_book';
+    
+    console.log('Returning pattern-based result:', { tool: null, params: enrichUpdatesFromMessage(message, updates) });
+    return { tool: null, params: enrichUpdatesFromMessage(message, updates) };
   } catch (err) {
     console.error('LLM extraction failed, falling back:', err);
     const fallback = {};
     const lower = message.toLowerCase();
     
-    // Parse patterns like: "change book <title>", "update book <title>"
-    const changeBookMatch = message.match(/^(?:change|update)\s+book\s+(.+)/i);
+    // Parse patterns like: "change book <title>", "update book <title>", "update the book <title>"
+    // But avoid matching generic words like "wanted", "needed", etc.
+    const changeBookMatch = message.match(/^(?:change|update)\s+(?:the\s+)?book\s+([^,]+?)(?:\s*,\s*|$)/i);
     if (changeBookMatch && changeBookMatch[1]) {
-      fallback.title = changeBookMatch[1].trim();
+      const title = changeBookMatch[1].trim();
+      // Only set as title if it's not a generic word
+      if (!/^(wanted|needed|required|desired)$/i.test(title)) {
+        fallback.title = title;
+        fallback.action = 'update_book';
+      }
+    }
+    
+    // Parse patterns like: "change author of <title>", "update author of <title>"
+    const changeAuthorMatch = message.match(/^(?:change|update)\s+author\s+of\s+(.+)/i);
+    if (changeAuthorMatch && changeAuthorMatch[1]) {
+      fallback.title = changeAuthorMatch[1].trim();
+      fallback.action = 'update_book';
+    }
+    
+    // Handle patterns like "I want to change the author to Sarah"
+    const changeAuthorToMatch = message.match(/I\s+want\s+to\s+change\s+the\s+author\s+to\s+([^,\s]+)/i);
+    if (changeAuthorToMatch && changeAuthorToMatch[1]) {
+      fallback.author = changeAuthorToMatch[1].trim();
       fallback.action = 'update_book';
     }
     
@@ -486,7 +542,7 @@ router.post('/message', async (req, res) => {
         executed: false,
         result: null,
         candidates: null,
-        message: `Missing required fields: ${missingReadable}. Please provide them in "field=value" format, e.g.: title=xxx, isbn=xxx, author=xxx.`
+        message: `I need some information to help you create a book. Please provide: ${missingReadable}. You can say something like: "title=The Three-Body Problem, author=Liu Cixin, isbn=9787229030933".`
       });
     }
 
@@ -500,7 +556,7 @@ router.post('/message', async (req, res) => {
           executed: false,
           result: null,
           candidates: session.candidates || null,
-          message: `Invalid date format: "${session.state.published_date}". Please use a valid format, e.g.: 2022-07-15 or 7/15/2022.`
+          message: `Sorry, invalid date format: "${session.state.published_date}". Please use a valid format, e.g.: 2022-07-15 or 7/15/2022.`
         });
       }
     }
@@ -512,11 +568,25 @@ router.post('/message', async (req, res) => {
       if (candidates.length === 1) {
         session.state.id = String(candidates[0]._id);
         session.candidates = null;
-        infoMessage = 'Found a single book. Please provide the fields to update (e.g., isbn=111).';
+        infoMessage = `Found the book! Please tell me what information you'd like to update, e.g.: "change ISBN to 123456" or "update author to John Smith".`;
       } else if (candidates.length > 1) {
-        infoMessage = `Found ${candidates.length} candidates. Send 'select <number>' or 'select <id>' to choose.`;
+        infoMessage = `Found ${candidates.length} similar books. Please select the one you want to update by sending "select 1", "select 2", etc.`;
       } else {
-        infoMessage = 'No matching title found. Please provide a more precise title.';
+        infoMessage = 'Sorry, no matching book title found. Please provide a more accurate title or check for spelling errors.';
+      }
+    }
+
+    // If update flow without id and without title -> ask for book title
+    if (session.state.action === 'update_book' && !session.state.id && !session.state.title) {
+      // Check if user provided field updates but no book title
+      const hasFieldUpdates = Object.keys(session.state).some(key => 
+        key !== 'action' && session.state[key] !== null && session.state[key] !== undefined
+      );
+      
+      if (hasFieldUpdates) {
+        infoMessage = 'I can see you want to make changes, but I need to know which book you want to update. Please tell me the book title, e.g.: "update The Three-Body Problem" or "change author of Harry Potter".';
+      } else {
+        infoMessage = 'I can help you update a book! Please tell me the title of the book you want to update, e.g.: "update The Three-Body Problem" or "change author of Harry Potter".';
       }
     }
 
@@ -530,16 +600,16 @@ router.post('/message', async (req, res) => {
             session.state.id = String(session.candidates[idx]._id);
             session.candidates = null;
           } else {
-            infoMessage = 'Invalid selection index. Please try again.';
+            infoMessage = 'Invalid selection. Please try again.';
           }
         } else if (sel.type === 'id') {
           const found = session.candidates.find((c) => String(c._id) === sel.value);
           if (found) {
             session.state.id = String(found._id);
             session.candidates = null;
-            infoMessage = 'Book selected. Please provide the fields to update (e.g., isbn=111).';
+            infoMessage = 'Great! Book selected. Please tell me what information you would like to update.';
           } else {
-            infoMessage = 'ID not found in candidates. Please verify.';
+            infoMessage = 'Sorry, ID not found in candidates. Please try again.';
           }
         }
       }
@@ -558,7 +628,7 @@ router.post('/message', async (req, res) => {
           executed: true,
           result: updated,
           candidates: null,
-          message: 'Confirmed. Update succeeded.'
+          message: 'Confirmed! Update saved successfully.'
         });
       } else {
         session.pendingUpdate = null;
@@ -597,7 +667,7 @@ router.post('/message', async (req, res) => {
           candidates: session.candidates || null,
           confirmation_needed: false,
           preview,
-          message: infoMessage || 'No changes detected. Please provide fields to update (e.g., isbn=111).'
+          message: infoMessage || 'No changes detected. Please tell me what information you would like to update, e.g.: "change ISBN to 123456".'
         });
       }
       session.pendingUpdate = { id: session.state.id, payload };
@@ -628,7 +698,7 @@ router.post('/message', async (req, res) => {
         executed: true,
         result,
         candidates: null,
-        message: 'Book created successfully. You can now continue adding other fields (e.g., description=..., publisher=..., published_date=YYYY-MM-DD), and I will update this book directly.'
+        message: 'Great! Book created successfully. You can now continue adding other fields (e.g., description=..., publisher=..., published_date=YYYY-MM-DD), and I will update this book directly.'
       });
     }
 

@@ -7,6 +7,14 @@ const bodyParser = require("body-parser");
 require('dotenv').config();
 
 const app = express();
+
+// Set timeout for all requests (30 seconds)
+app.use((req, res, next) => {
+  req.setTimeout(30000);
+  res.setTimeout(30000);
+  next();
+});
+
 // use the cors middleware with the
 // origin and credentials options
 app.use(cors({ origin: true, credentials: true }));

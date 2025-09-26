@@ -24,6 +24,11 @@ export default function AssistantBubble() {
         });
         const data = await res.json();
         setSessionId(data.session_id);
+        // Add welcome message when session is created
+        setMessages([{ 
+          role: 'assistant', 
+          content: 'Hello! I\'m your book management assistant 😊 I can help you add new books to the library or update existing book information. Please tell me what you\'d like to do, e.g.: "create a new book" or "update The Three-Body Problem".' 
+        }]);
       } catch (e) {
         // no-op
       }
@@ -78,7 +83,7 @@ export default function AssistantBubble() {
     
     if (!recog) {
       console.log('Speech recognition not available');
-      setMessages((m) => [...m, { role: 'assistant', content: 'Speech recognition unavailable. Please check browser support or use text input.' }]);
+      setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, speech recognition is unavailable. Please check browser support or use text input.' }]);
       return;
     }
     
@@ -94,7 +99,7 @@ export default function AssistantBubble() {
         setListening(true);
       } catch (error) {
         console.error('Error starting recognition:', error);
-        setMessages((m) => [...m, { role: 'assistant', content: 'Failed to start speech recognition. Try again or use text input.' }]);
+        setMessages((m) => [...m, { role: 'assistant', content: 'Failed to start speech recognition. Please try again or use text input.' }]);
       }
     }
   };
@@ -114,17 +119,29 @@ export default function AssistantBubble() {
         currentSessionId = data.session_id;
         setSessionId(currentSessionId);
       } catch (e) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Cannot connect to backend. Session creation failed. Ensure server runs on 8082.' }]);
+        setMessages((m) => [...m, { role: 'assistant', content: 'Cannot connect to backend server. Session creation failed. Please ensure the server is running on port 8082.' }]);
         return null;
       }
     }
     try {
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
       const res = await fetch(`${API_BASE}/api/assistant/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: currentSessionId, message: text }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error('bad response');
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Backend error:', errorText);
+        throw new Error(`Backend error: ${res.status} - ${errorText}`);
+      }
       const data = await res.json();
       // Show backend info message if any
       if (data.message) {
@@ -140,7 +157,7 @@ export default function AssistantBubble() {
       setNeedsConfirm(!!data.confirmation_needed);
       setPreview(data.preview || null);
       if (data.executed) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Saved to database.' }]);
+        setMessages((m) => [...m, { role: 'assistant', content: 'Saved to database!' }]);
         // Notify other parts of app
         const isUpdate = data && data.state && data.state.action === 'update_book';
         const detail = { type: isUpdate ? 'updated' : 'created', book: data.result };
@@ -148,7 +165,16 @@ export default function AssistantBubble() {
       }
       return data;
     } catch (e) {
-      setMessages((m) => [...m, { role: 'assistant', content: 'Request failed: cannot reach backend or invalid response.' }]);
+      console.error('Request failed:', e);
+      let errorMessage = 'Request failed: cannot reach backend server or invalid response.';
+      
+      if (e.name === 'AbortError') {
+        errorMessage = 'Request timed out. The AI response is taking too long. Please try again.';
+      } else if (e.message.includes('Backend error')) {
+        errorMessage = e.message;
+      }
+      
+      setMessages((m) => [...m, { role: 'assistant', content: errorMessage }]);
       return null;
     }
   };
@@ -189,7 +215,6 @@ export default function AssistantBubble() {
       try { recog.stop(); } catch {}
     }
     setListening(false);
-    setMessages([]);
     setInput('');
     setCandidates(null);
     setPreview(null);
@@ -202,9 +227,14 @@ export default function AssistantBubble() {
       });
       const data = await res.json();
       setSessionId(data.session_id);
+      // Add welcome message for new chat
+      setMessages([{ 
+        role: 'assistant', 
+        content: 'Hello! I\'m your book management assistant 😊 I can help you add new books to the library or update existing book information. Please tell me what you\'d like to do, e.g.: "create a new book" or "update The Three-Body Problem".' 
+      }]);
     } catch (e) {
       setSessionId(null);
-      setMessages((m) => [...m, { role: 'assistant', content: 'Failed to create a new session. Please verify the server is running.' }]);
+      setMessages([{ role: 'assistant', content: 'Failed to create a new session. Please verify the server is running.' }]);
     }
   };
 
@@ -225,7 +255,7 @@ export default function AssistantBubble() {
             flexDirection: 'column'
           }}>
             <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span> book assistant </span>
+              <span> Book Assistant </span>
               <button onClick={newChat} className="btn btn-sm btn-outline-secondary">New Chat</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 8, background: '#f9fafb', borderRadius: 8 }}>
